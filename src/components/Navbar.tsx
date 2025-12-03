@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { Menu, X, FileText, BarChart3, MessageSquare, User } from "lucide-react";
+import { Menu, X, FileText, BarChart3, MessageSquare, User, LogOut, Shield } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/hooks/useAuth";
 
 const navLinks = [
   { href: "/", label: "Home" },
@@ -15,6 +16,13 @@ const navLinks = [
 export function Navbar() {
   const [isOpen, setIsOpen] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
+  const { user, isAdmin, signOut, isLoading } = useAuth();
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate("/");
+  };
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 glass-strong">
@@ -44,15 +52,49 @@ export function Navbar() {
                 {link.label}
               </Link>
             ))}
+            {isAdmin && (
+              <Link
+                to="/admin"
+                className={cn(
+                  "px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 flex items-center gap-1",
+                  location.pathname === "/admin"
+                    ? "bg-primary/10 text-primary"
+                    : "text-muted-foreground hover:text-foreground hover:bg-secondary"
+                )}
+              >
+                <Shield className="w-4 h-4" />
+                Admin
+              </Link>
+            )}
           </div>
 
           {/* CTA Button */}
           <div className="hidden md:flex items-center gap-3">
-            <Button variant="ghost" size="sm">
-              <User className="w-4 h-4 mr-2" />
-              Login
-            </Button>
-            <Button size="sm">Get Started</Button>
+            {!isLoading && (
+              <>
+                {user ? (
+                  <>
+                    <span className="text-sm text-muted-foreground">
+                      {user.email}
+                    </span>
+                    <Button variant="ghost" size="sm" onClick={handleSignOut}>
+                      <LogOut className="w-4 h-4 mr-2" />
+                      Logout
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <Button variant="ghost" size="sm" onClick={() => navigate("/auth")}>
+                      <User className="w-4 h-4 mr-2" />
+                      Login
+                    </Button>
+                    <Button size="sm" onClick={() => navigate("/auth")}>
+                      Get Started
+                    </Button>
+                  </>
+                )}
+              </>
+            )}
           </div>
 
           {/* Mobile Menu Button */}
@@ -91,9 +133,37 @@ export function Navbar() {
                   {link.label}
                 </Link>
               ))}
+              {isAdmin && (
+                <Link
+                  to="/admin"
+                  onClick={() => setIsOpen(false)}
+                  className={cn(
+                    "flex items-center gap-3 px-4 py-3 rounded-lg transition-all",
+                    location.pathname === "/admin"
+                      ? "bg-primary/10 text-primary"
+                      : "text-muted-foreground hover:bg-secondary"
+                  )}
+                >
+                  <Shield className="w-5 h-5" />
+                  Admin Dashboard
+                </Link>
+              )}
               <div className="pt-4 border-t border-border flex gap-2">
-                <Button variant="outline" className="flex-1">Login</Button>
-                <Button className="flex-1">Get Started</Button>
+                {user ? (
+                  <Button variant="outline" className="flex-1" onClick={handleSignOut}>
+                    <LogOut className="w-4 h-4 mr-2" />
+                    Logout
+                  </Button>
+                ) : (
+                  <>
+                    <Button variant="outline" className="flex-1" onClick={() => { setIsOpen(false); navigate("/auth"); }}>
+                      Login
+                    </Button>
+                    <Button className="flex-1" onClick={() => { setIsOpen(false); navigate("/auth"); }}>
+                      Get Started
+                    </Button>
+                  </>
+                )}
               </div>
             </div>
           </motion.div>
