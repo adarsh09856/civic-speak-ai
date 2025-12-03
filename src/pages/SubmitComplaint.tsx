@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
+import { useNavigate } from "react-router-dom";
 import { Navbar } from "@/components/Navbar";
 import { Footer } from "@/components/Footer";
 import { Button } from "@/components/ui/button";
@@ -14,15 +15,16 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { 
-  Upload, 
   MapPin, 
-  Mic, 
   Send, 
   FileImage,
   CheckCircle,
-  AlertCircle
+  AlertCircle,
+  Loader2
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/useAuth";
+import { supabase } from "@/integrations/supabase/client";
 
 const categories = [
   "Road & Transport",
@@ -54,6 +56,8 @@ const languages = [
 
 export default function SubmitComplaint() {
   const { toast } = useToast();
+  const { user, isLoading } = useAuth();
+  const navigate = useNavigate();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formData, setFormData] = useState({
     title: "",
@@ -64,19 +68,92 @@ export default function SubmitComplaint() {
     attachments: [] as File[],
   });
 
+  useEffect(() => {
+    if (!isLoading && !user) {
+      toast({
+        title: "Authentication Required",
+        description: "Please login to submit a complaint",
+        variant: "destructive",
+      });
+      navigate("/auth");
+    }
+  }, [user, isLoading, navigate, toast]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (!user) {
+      toast({
+        title: "Please login",
+        description: "You need to be logged in to submit a complaint",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!formData.title || !formData.category || !formData.description) {
+      toast({
+        title: "Missing Fields",
+        description: "Please fill in all required fields",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setIsSubmitting(true);
 
-    // Simulate AI processing
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    try {
+      const { data, error } = await supabase
+        .from('complaints')
+        .insert({
+          user_id: user.id,
+          title: formData.title,
+          category: formData.category,
+          description: formData.description,
+          location: formData.location || null,
+          language: formData.language,
+        })
+        .select('complaint_id')
+        .single();
 
-    toast({
-      title: "Complaint Submitted Successfully!",
-      description: "Your complaint ID is JC-2024-00847. Track it anytime.",
-    });
+      if (error) throw error;
 
-    setIsSubmitting(false);
+      // Send notification for new submission
+      await supabase.functions.invoke('send-notification', {
+        body: {
+          complaintId: data.complaint_id,
+          userId: user.id,
+          status: 'SUBMITTED',
+          complaintTitle: formData.title,
+        }
+      });
+
+      toast({
+        title: "Complaint Submitted Successfully!",
+        description: `Your complaint ID is ${data.complaint_id}. Track it anytime.`,
+      });
+
+      // Reset form
+      setFormData({
+        title: "",
+        category: "",
+        language: "English",
+        description: "",
+        location: "",
+        attachments: [],
+      });
+
+      // Navigate to track page
+      navigate("/track");
+    } catch (error: any) {
+      toast({
+        title: "Submission Failed",
+        description: error.message || "Something went wrong. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -87,6 +164,14 @@ export default function SubmitComplaint() {
       }));
     }
   };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background">
@@ -136,7 +221,7 @@ export default function SubmitComplaint() {
               <div className="space-y-6">
                 {/* Title */}
                 <div className="space-y-2">
-                  <Label htmlFor="title">Complaint Title</Label>
+                  <Label htmlFor="title">Complaint Title *</Label>
                   <Input
                     id="title"
                     placeholder="Brief title describing your issue"
@@ -149,13 +234,14 @@ export default function SubmitComplaint() {
                 {/* Category & Language Row */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label>Category (Auto-detected)</Label>
+                    <Label>Category *</Label>
                     <Select
                       value={formData.category}
                       onValueChange={(value) => setFormData((prev) => ({ ...prev, category: value }))}
+                      required
                     >
                       <SelectTrigger>
-                        <SelectValue placeholder="Select or let AI detect" />
+                        <SelectValue placeholder="Select category" />
                       </SelectTrigger>
                       <SelectContent>
                         {categories.map((cat) => (
@@ -189,13 +275,7 @@ export default function SubmitComplaint() {
 
                 {/* Description */}
                 <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="description">Description</Label>
-                    <Button type="button" variant="ghost" size="sm" className="gap-2">
-                      <Mic className="w-4 h-4" />
-                      Voice Input
-                    </Button>
-                  </div>
+                  <Label htmlFor="description">Description *</Label>
                   <Textarea
                     id="description"
                     placeholder="Describe your issue in detail. You can write in any language..."
@@ -212,7 +292,7 @@ export default function SubmitComplaint() {
                   <div className="relative">
                     <Input
                       id="location"
-                      placeholder="Enter address or use current location"
+                      placeholder="Enter address or area"
                       value={formData.location}
                       onChange={(e) => setFormData((prev) => ({ ...prev, location: e.target.value }))}
                     />
@@ -274,8 +354,8 @@ export default function SubmitComplaint() {
                 >
                   {isSubmitting ? (
                     <>
-                      <div className="w-5 h-5 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
-                      AI Processing...
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      Submitting...
                     </>
                   ) : (
                     <>

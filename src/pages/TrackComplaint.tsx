@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Navbar } from "@/components/Navbar";
 import { Footer } from "@/components/Footer";
@@ -9,66 +9,25 @@ import {
   Search, 
   Clock, 
   CheckCircle2, 
-  AlertCircle, 
-  ArrowRight,
   FileText,
-  User,
   Building2,
-  Calendar
+  Calendar,
+  Loader2
 } from "lucide-react";
+import { useAuth } from "@/hooks/useAuth";
+import { supabase } from "@/integrations/supabase/client";
+import { Database } from "@/integrations/supabase/types";
 
-// Mock data for demo
-const mockComplaint = {
-  id: "JC-2024-00847",
-  title: "Broken streetlight near Main Market",
-  category: "Electricity",
-  status: "IN_PROGRESS",
-  priority: "HIGH",
-  submittedAt: "2024-01-15",
-  lastUpdated: "2024-01-17",
-  department: "Municipal Electricity Board",
-  assignedTo: "Rajesh Kumar",
-  description: "The streetlight near Main Market has been broken for 2 weeks. It's causing safety concerns for pedestrians and shopkeepers in the evening.",
-  timeline: [
-    {
-      status: "SUBMITTED",
-      date: "2024-01-15 10:30 AM",
-      description: "Complaint submitted successfully",
-      completed: true,
-    },
-    {
-      status: "AI_PROCESSED",
-      date: "2024-01-15 10:31 AM",
-      description: "AI classified as Electricity issue with HIGH priority",
-      completed: true,
-    },
-    {
-      status: "ASSIGNED",
-      date: "2024-01-15 02:15 PM",
-      description: "Assigned to Municipal Electricity Board",
-      completed: true,
-    },
-    {
-      status: "IN_PROGRESS",
-      date: "2024-01-17 09:00 AM",
-      description: "Team dispatched for on-site inspection",
-      completed: true,
-    },
-    {
-      status: "RESOLVED",
-      date: "Expected: 2024-01-20",
-      description: "Issue resolution expected",
-      completed: false,
-    },
-  ],
-};
+type Complaint = Database['public']['Tables']['complaints']['Row'];
+type ComplaintStatus = Database['public']['Enums']['complaint_status'];
 
-const statusColors: Record<string, string> = {
+const statusColors: Record<ComplaintStatus, string> = {
   SUBMITTED: "bg-secondary text-secondary-foreground",
   AI_PROCESSED: "bg-accent/20 text-accent",
   ASSIGNED: "bg-primary/20 text-primary",
   IN_PROGRESS: "bg-warning/20 text-warning",
   RESOLVED: "bg-success/20 text-success",
+  REJECTED: "bg-destructive/20 text-destructive",
 };
 
 const priorityColors: Record<string, string> = {
@@ -77,22 +36,68 @@ const priorityColors: Record<string, string> = {
   LOW: "bg-success text-success-foreground",
 };
 
+const statusLabels: Record<ComplaintStatus, string> = {
+  SUBMITTED: "Submitted",
+  AI_PROCESSED: "AI Processed",
+  ASSIGNED: "Assigned",
+  IN_PROGRESS: "In Progress",
+  RESOLVED: "Resolved",
+  REJECTED: "Rejected",
+};
+
 export default function TrackComplaint() {
+  const { user } = useAuth();
   const [searchId, setSearchId] = useState("");
-  const [complaint, setComplaint] = useState<typeof mockComplaint | null>(null);
+  const [complaint, setComplaint] = useState<Complaint | null>(null);
+  const [userComplaints, setUserComplaints] = useState<Complaint[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [isLoadingUserComplaints, setIsLoadingUserComplaints] = useState(false);
+
+  useEffect(() => {
+    if (user) {
+      fetchUserComplaints();
+    }
+  }, [user]);
+
+  const fetchUserComplaints = async () => {
+    if (!user) return;
+    
+    setIsLoadingUserComplaints(true);
+    const { data, error } = await supabase
+      .from('complaints')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false });
+
+    if (!error && data) {
+      setUserComplaints(data);
+    }
+    setIsLoadingUserComplaints(false);
+  };
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!searchId.trim()) return;
+    
     setIsSearching(true);
     
-    // Simulate API call
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    
-    if (searchId.toUpperCase() === "JC-2024-00847" || searchId) {
-      setComplaint(mockComplaint);
+    const { data, error } = await supabase
+      .from('complaints')
+      .select('*')
+      .eq('complaint_id', searchId.toUpperCase())
+      .single();
+
+    if (!error && data) {
+      setComplaint(data);
+    } else {
+      setComplaint(null);
     }
     setIsSearching(false);
+  };
+
+  const selectComplaint = (c: Complaint) => {
+    setComplaint(c);
+    setSearchId(c.complaint_id);
   };
 
   return (
@@ -129,20 +134,58 @@ export default function TrackComplaint() {
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
                 <Input
-                  placeholder="Enter Complaint ID (e.g., JC-2024-00847)"
+                  placeholder="Enter Complaint ID (e.g., JC-2024-00001)"
                   value={searchId}
                   onChange={(e) => setSearchId(e.target.value)}
                   className="pl-10 h-12"
                 />
               </div>
               <Button type="submit" size="lg" disabled={isSearching}>
-                {isSearching ? "Searching..." : "Track"}
+                {isSearching ? <Loader2 className="w-5 h-5 animate-spin" /> : "Track"}
               </Button>
             </form>
-            <p className="text-sm text-muted-foreground mt-2 text-center">
-              Try: JC-2024-00847 for demo
-            </p>
           </motion.div>
+
+          {/* User's Complaints List */}
+          {user && userComplaints.length > 0 && !complaint && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.2 }}
+              className="max-w-4xl mx-auto mb-8"
+            >
+              <h3 className="text-lg font-semibold text-foreground mb-4">Your Complaints</h3>
+              <div className="space-y-3">
+                {isLoadingUserComplaints ? (
+                  <div className="flex justify-center p-8">
+                    <Loader2 className="w-6 h-6 animate-spin text-primary" />
+                  </div>
+                ) : (
+                  userComplaints.map((c) => (
+                    <div
+                      key={c.id}
+                      onClick={() => selectComplaint(c)}
+                      className="bg-card rounded-xl border border-border p-4 cursor-pointer hover:border-primary/50 transition-all"
+                    >
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="font-mono text-sm text-primary">{c.complaint_id}</span>
+                            <Badge className={priorityColors[c.priority]}>{c.priority}</Badge>
+                          </div>
+                          <p className="text-foreground font-medium truncate">{c.title}</p>
+                          <p className="text-sm text-muted-foreground">{c.category}</p>
+                        </div>
+                        <Badge className={statusColors[c.status]}>
+                          {statusLabels[c.status]}
+                        </Badge>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </motion.div>
+          )}
 
           {/* Complaint Details */}
           {complaint && (
@@ -151,12 +194,23 @@ export default function TrackComplaint() {
               animate={{ opacity: 1, y: 0 }}
               className="max-w-4xl mx-auto"
             >
+              {/* Back button */}
+              {userComplaints.length > 0 && (
+                <Button 
+                  variant="ghost" 
+                  className="mb-4"
+                  onClick={() => setComplaint(null)}
+                >
+                  ← Back to list
+                </Button>
+              )}
+
               {/* Status Card */}
               <div className="bg-card rounded-2xl border border-border p-6 md:p-8 shadow-lg mb-6">
                 <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
                   <div>
                     <div className="flex items-center gap-2 mb-2">
-                      <h2 className="text-2xl font-bold text-foreground">{complaint.id}</h2>
+                      <h2 className="text-2xl font-bold text-foreground">{complaint.complaint_id}</h2>
                       <Badge className={priorityColors[complaint.priority]}>
                         {complaint.priority}
                       </Badge>
@@ -164,7 +218,7 @@ export default function TrackComplaint() {
                     <p className="text-lg text-foreground">{complaint.title}</p>
                   </div>
                   <Badge className={`${statusColors[complaint.status]} text-sm px-4 py-2`}>
-                    {complaint.status.replace("_", " ")}
+                    {statusLabels[complaint.status]}
                   </Badge>
                 </div>
 
@@ -180,23 +234,27 @@ export default function TrackComplaint() {
                   <div className="p-3 rounded-lg bg-secondary/50">
                     <div className="flex items-center gap-2 text-muted-foreground mb-1">
                       <Building2 className="w-4 h-4" />
-                      <span className="text-xs">Department</span>
+                      <span className="text-xs">Location</span>
                     </div>
-                    <p className="font-medium text-foreground text-sm">{complaint.department}</p>
-                  </div>
-                  <div className="p-3 rounded-lg bg-secondary/50">
-                    <div className="flex items-center gap-2 text-muted-foreground mb-1">
-                      <User className="w-4 h-4" />
-                      <span className="text-xs">Assigned To</span>
-                    </div>
-                    <p className="font-medium text-foreground">{complaint.assignedTo}</p>
+                    <p className="font-medium text-foreground text-sm">{complaint.location || "Not specified"}</p>
                   </div>
                   <div className="p-3 rounded-lg bg-secondary/50">
                     <div className="flex items-center gap-2 text-muted-foreground mb-1">
                       <Calendar className="w-4 h-4" />
+                      <span className="text-xs">Submitted</span>
+                    </div>
+                    <p className="font-medium text-foreground">
+                      {new Date(complaint.created_at).toLocaleDateString()}
+                    </p>
+                  </div>
+                  <div className="p-3 rounded-lg bg-secondary/50">
+                    <div className="flex items-center gap-2 text-muted-foreground mb-1">
+                      <Clock className="w-4 h-4" />
                       <span className="text-xs">Last Updated</span>
                     </div>
-                    <p className="font-medium text-foreground">{complaint.lastUpdated}</p>
+                    <p className="font-medium text-foreground">
+                      {new Date(complaint.updated_at).toLocaleDateString()}
+                    </p>
                   </div>
                 </div>
 
@@ -209,55 +267,69 @@ export default function TrackComplaint() {
               {/* Timeline */}
               <div className="bg-card rounded-2xl border border-border p-6 md:p-8 shadow-lg">
                 <h3 className="text-lg font-semibold text-foreground mb-6">Progress Timeline</h3>
-                <div className="space-y-6">
-                  {complaint.timeline.map((step, index) => (
-                    <div key={index} className="flex gap-4">
-                      {/* Icon */}
+                <div className="space-y-4">
+                  <div className="flex gap-4">
+                    <div className="flex flex-col items-center">
+                      <div className="w-10 h-10 rounded-full flex items-center justify-center bg-success text-success-foreground">
+                        <CheckCircle2 className="w-5 h-5" />
+                      </div>
+                      <div className="w-0.5 h-full min-h-[40px] bg-success" />
+                    </div>
+                    <div className="pb-6">
+                      <Badge variant="outline" className="border-success text-success mb-1">
+                        SUBMITTED
+                      </Badge>
+                      <p className="text-foreground font-medium">Complaint submitted successfully</p>
+                      <p className="text-sm text-muted-foreground">
+                        {new Date(complaint.created_at).toLocaleString()}
+                      </p>
+                    </div>
+                  </div>
+                  
+                  {complaint.status !== 'SUBMITTED' && (
+                    <div className="flex gap-4">
                       <div className="flex flex-col items-center">
-                        <div
-                          className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                            step.completed
-                              ? "bg-success text-success-foreground"
-                              : "bg-secondary text-muted-foreground"
-                          }`}
-                        >
-                          {step.completed ? (
-                            <CheckCircle2 className="w-5 h-5" />
-                          ) : (
-                            <Clock className="w-5 h-5" />
-                          )}
+                        <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                          complaint.status === 'RESOLVED' || complaint.status === 'IN_PROGRESS' || complaint.status === 'ASSIGNED' || complaint.status === 'AI_PROCESSED'
+                            ? 'bg-success text-success-foreground'
+                            : 'bg-secondary text-muted-foreground'
+                        }`}>
+                          <CheckCircle2 className="w-5 h-5" />
                         </div>
-                        {index < complaint.timeline.length - 1 && (
-                          <div
-                            className={`w-0.5 h-full min-h-[40px] ${
-                              step.completed ? "bg-success" : "bg-border"
-                            }`}
-                          />
+                        {complaint.status !== 'AI_PROCESSED' && complaint.status !== 'REJECTED' && (
+                          <div className={`w-0.5 h-full min-h-[40px] ${
+                            complaint.status === 'RESOLVED' || complaint.status === 'IN_PROGRESS' || complaint.status === 'ASSIGNED'
+                              ? 'bg-success' : 'bg-border'
+                          }`} />
                         )}
                       </div>
-
-                      {/* Content */}
                       <div className="pb-6">
-                        <div className="flex items-center gap-2 mb-1">
-                          <Badge
-                            variant="outline"
-                            className={step.completed ? "border-success text-success" : ""}
-                          >
-                            {step.status.replace("_", " ")}
-                          </Badge>
-                        </div>
-                        <p className="text-foreground font-medium">{step.description}</p>
-                        <p className="text-sm text-muted-foreground">{step.date}</p>
+                        <Badge variant="outline" className={
+                          complaint.status === 'AI_PROCESSED' || complaint.status === 'ASSIGNED' || complaint.status === 'IN_PROGRESS' || complaint.status === 'RESOLVED'
+                            ? "border-success text-success" : ""
+                        }>
+                          {statusLabels[complaint.status]}
+                        </Badge>
+                        <p className="text-foreground font-medium">
+                          {complaint.status === 'AI_PROCESSED' && 'Complaint analyzed and categorized'}
+                          {complaint.status === 'ASSIGNED' && 'Assigned to relevant department'}
+                          {complaint.status === 'IN_PROGRESS' && 'Work in progress'}
+                          {complaint.status === 'RESOLVED' && 'Issue has been resolved'}
+                          {complaint.status === 'REJECTED' && 'Complaint rejected'}
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          {new Date(complaint.updated_at).toLocaleString()}
+                        </p>
                       </div>
                     </div>
-                  ))}
+                  )}
                 </div>
               </div>
             </motion.div>
           )}
 
           {/* Empty State */}
-          {!complaint && !isSearching && (
+          {!complaint && !isSearching && userComplaints.length === 0 && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
