@@ -24,6 +24,7 @@ import {
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { ComplaintDetailDialog } from "@/components/ComplaintDetailDialog";
 import {
   Search,
   Filter,
@@ -34,8 +35,6 @@ import {
   AlertTriangle,
   XCircle,
   Loader2,
-  BarChart3,
-  Users,
   FileText,
   Shield,
 } from "lucide-react";
@@ -84,6 +83,8 @@ export default function AdminDashboard() {
     inProgress: 0,
     resolved: 0,
   });
+  const [selectedComplaint, setSelectedComplaint] = useState<Complaint | null>(null);
+  const [isDetailOpen, setIsDetailOpen] = useState(false);
 
   useEffect(() => {
     if (!isLoading && (!user || !isAdmin)) {
@@ -361,22 +362,34 @@ export default function AdminDashboard() {
                         {new Date(complaint.created_at).toLocaleDateString()}
                       </TableCell>
                       <TableCell>
-                        <Select
-                          value={complaint.status}
-                          onValueChange={(value) => updateComplaintStatus(complaint.id, value as ComplaintStatus)}
-                        >
-                          <SelectTrigger className="w-36">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="SUBMITTED">Submitted</SelectItem>
-                            <SelectItem value="AI_PROCESSED">AI Processed</SelectItem>
-                            <SelectItem value="ASSIGNED">Assigned</SelectItem>
-                            <SelectItem value="IN_PROGRESS">In Progress</SelectItem>
-                            <SelectItem value="RESOLVED">Resolved</SelectItem>
-                            <SelectItem value="REJECTED">Rejected</SelectItem>
-                          </SelectContent>
-                        </Select>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              setSelectedComplaint(complaint);
+                              setIsDetailOpen(true);
+                            }}
+                          >
+                            <Eye className="w-4 h-4" />
+                          </Button>
+                          <Select
+                            value={complaint.status}
+                            onValueChange={(value) => updateComplaintStatus(complaint.id, value as ComplaintStatus)}
+                          >
+                            <SelectTrigger className="w-36">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="SUBMITTED">Submitted</SelectItem>
+                              <SelectItem value="AI_PROCESSED">AI Processed</SelectItem>
+                              <SelectItem value="ASSIGNED">Assigned</SelectItem>
+                              <SelectItem value="IN_PROGRESS">In Progress</SelectItem>
+                              <SelectItem value="RESOLVED">Resolved</SelectItem>
+                              <SelectItem value="REJECTED">Rejected</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -386,6 +399,12 @@ export default function AdminDashboard() {
           </motion.div>
         </div>
       </main>
+
+      <ComplaintDetailDialog
+        complaint={selectedComplaint}
+        open={isDetailOpen}
+        onOpenChange={setIsDetailOpen}
+      />
 
       <Footer />
     </div>
