@@ -25,30 +25,76 @@ const handler = async (req: Request): Promise<Response> => {
 
     const { complaintId, userId, status, complaintTitle }: NotificationRequest = await req.json();
 
+    console.log(`Processing notification for complaint ${complaintId}, status: ${status}`);
+
     const statusMessages: Record<string, string> = {
       SUBMITTED: "Your complaint has been submitted successfully.",
-      UNDER_REVIEW: "Your complaint is now under review by the relevant department.",
+      AI_PROCESSED: "Your complaint has been analyzed by our AI system.",
+      ASSIGNED: "Your complaint has been assigned to the relevant department.",
       IN_PROGRESS: "Good news! Work has started on resolving your complaint.",
       RESOLVED: "Your complaint has been resolved. Thank you for your patience.",
       REJECTED: "Your complaint could not be processed. Please contact support for more information.",
     };
 
-    const message = statusMessages[status] || `Your complaint status has been updated to ${status}.`;
+    const adminStatusMessages: Record<string, string> = {
+      SUBMITTED: "A new complaint has been submitted and requires attention.",
+      AI_PROCESSED: "A complaint has been processed by AI and awaits review.",
+      ASSIGNED: "A complaint has been assigned to a department.",
+      IN_PROGRESS: "A complaint is now being worked on.",
+      RESOLVED: "A complaint has been marked as resolved.",
+      REJECTED: "A complaint has been rejected.",
+    };
+
+    const userMessage = statusMessages[status] || `Your complaint status has been updated to ${status}.`;
+    const adminMessage = adminStatusMessages[status] || `Complaint status updated to ${status}.`;
     const title = `Complaint ${status.replace('_', ' ')}: ${complaintTitle}`;
 
-    // Create in-app notification
-    const { error: notifError } = await supabase
+    // Create in-app notification for the user (using PUSH type for in-app)
+    const { error: userNotifError } = await supabase
       .from('notifications')
       .insert({
         user_id: userId,
         complaint_id: complaintId,
         title: title,
-        message: message,
-        type: 'IN_APP',
+        message: userMessage,
+        type: 'PUSH', // Using PUSH for in-app notifications
       });
 
-    if (notifError) {
-      console.error("Failed to create notification:", notifError);
+    if (userNotifError) {
+      console.error("Failed to create user notification:", userNotifError);
+    } else {
+      console.log("User notification created successfully");
+    }
+
+    // Get all admin users to notify them
+    const { data: adminRoles, error: adminError } = await supabase
+      .from('user_roles')
+      .select('user_id')
+      .eq('role', 'admin');
+
+    if (adminError) {
+      console.error("Failed to fetch admin users:", adminError);
+    } else if (adminRoles && adminRoles.length > 0) {
+      console.log(`Found ${adminRoles.length} admin(s) to notify`);
+      
+      // Create notifications for all admins
+      const adminNotifications = adminRoles.map(admin => ({
+        user_id: admin.user_id,
+        complaint_id: complaintId,
+        title: `[Admin] ${title}`,
+        message: adminMessage,
+        type: 'PUSH' as const,
+      }));
+
+      const { error: adminNotifError } = await supabase
+        .from('notifications')
+        .insert(adminNotifications);
+
+      if (adminNotifError) {
+        console.error("Failed to create admin notifications:", adminNotifError);
+      } else {
+        console.log("Admin notifications created successfully");
+      }
     }
 
     // Get user email for email notification
@@ -58,9 +104,10 @@ const handler = async (req: Request): Promise<Response> => {
       .eq('user_id', userId)
       .single();
 
-    // If RESEND_API_KEY is configured, send email
+    // If RESEND_API_KEY is configured, send email to user
     const resendApiKey = Deno.env.get("RESEND_API_KEY");
     if (resendApiKey && profile?.email) {
+      console.log(`Sending email to ${profile.email}`);
       try {
         const emailResponse = await fetch("https://api.resend.com/emails", {
           method: "POST",
@@ -79,15 +126,11 @@ const handler = async (req: Request): Promise<Response> => {
                 </div>
                 <div style="background: #ffffff; padding: 30px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 16px 16px;">
                   <h2 style="color: #1a3a8f; margin-top: 0;">Hello${profile.full_name ? ` ${profile.full_name}` : ''}!</h2>
-                  <p style="color: #374151; font-size: 16px; line-height: 1.6;">${message}</p>
+                  <p style="color: #374151; font-size: 16px; line-height: 1.6;">${userMessage}</p>
                   <div style="background: #f3f4f6; padding: 16px; border-radius: 8px; margin: 20px 0;">
                     <p style="margin: 0; color: #6b7280; font-size: 14px;">Complaint Reference:</p>
                     <p style="margin: 8px 0 0 0; color: #1a3a8f; font-weight: bold; font-size: 16px;">${complaintTitle}</p>
                   </div>
-                  <a href="${Deno.env.get("SUPABASE_URL")?.replace('.supabase.co', '.lovable.app')}/track" 
-                     style="display: inline-block; background: #2f9e8f; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: 500;">
-                    Track Your Complaint
-                  </a>
                   <p style="color: #9ca3af; font-size: 12px; margin-top: 30px;">
                     This is an automated message from JanConnect+. Please do not reply to this email.
                   </p>
@@ -98,7 +141,8 @@ const handler = async (req: Request): Promise<Response> => {
         });
 
         if (emailResponse.ok) {
-          // Update notification as sent
+          console.log("Email sent successfully");
+          // Update notification to show email was sent
           await supabase
             .from('notifications')
             .update({ sent_at: new Date().toISOString(), type: 'EMAIL' })
@@ -106,14 +150,19 @@ const handler = async (req: Request): Promise<Response> => {
             .eq('user_id', userId)
             .order('created_at', { ascending: false })
             .limit(1);
+        } else {
+          const errorData = await emailResponse.text();
+          console.error("Email API error:", errorData);
         }
       } catch (emailError) {
         console.error("Email sending failed:", emailError);
       }
+    } else {
+      console.log("Email not sent - RESEND_API_KEY not configured or user has no email");
     }
 
     return new Response(
-      JSON.stringify({ success: true, message: "Notification created" }),
+      JSON.stringify({ success: true, message: "Notifications created" }),
       { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } }
     );
   } catch (error: any) {

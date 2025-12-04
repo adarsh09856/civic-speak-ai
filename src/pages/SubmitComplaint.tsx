@@ -113,15 +113,15 @@ export default function SubmitComplaint() {
           location: formData.location || null,
           language: formData.language,
         })
-        .select('complaint_id')
+        .select('id, complaint_id')
         .single();
 
       if (error) throw error;
 
-      // Send notification for new submission
+      // Send notification for new submission - use id (uuid) not complaint_id (text)
       await supabase.functions.invoke('send-notification', {
         body: {
-          complaintId: data.complaint_id,
+          complaintId: data.id,
           userId: user.id,
           status: 'SUBMITTED',
           complaintTitle: formData.title,
