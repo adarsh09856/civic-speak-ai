@@ -5,6 +5,7 @@ import { Menu, X, FileText, BarChart3, MessageSquare, User, LogOut, Shield } fro
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
+import { NotificationBell } from "@/components/NotificationBell";
 
 const navLinks = [
   { href: "/", label: "Home" },
@@ -74,6 +75,7 @@ export function Navbar() {
               <>
                 {user ? (
                   <>
+                    <NotificationBell />
                     <span className="text-sm text-muted-foreground">
                       {user.email}
                     </span>
