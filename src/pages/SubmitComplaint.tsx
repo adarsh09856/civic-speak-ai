@@ -4,7 +4,6 @@ import { useNavigate } from "react-router-dom";
 import { Navbar } from "@/components/Navbar";
 import { Footer } from "@/components/Footer";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { 
@@ -15,7 +14,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { 
-  MapPin, 
   Send, 
   FileImage,
   CheckCircle,
@@ -25,6 +23,8 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
+import { GoogleMapsLocationPicker } from "@/components/GoogleMapsLocationPicker";
+import { Input } from "@/components/ui/input";
 
 const categories = [
   "Road & Transport",
@@ -65,6 +65,8 @@ export default function SubmitComplaint() {
     language: "English",
     description: "",
     location: "",
+    geoLat: undefined as number | undefined,
+    geoLng: undefined as number | undefined,
     attachments: [] as File[],
   });
 
@@ -111,6 +113,8 @@ export default function SubmitComplaint() {
           category: formData.category,
           description: formData.description,
           location: formData.location || null,
+          geo_lat: formData.geoLat || null,
+          geo_lng: formData.geoLng || null,
           language: formData.language,
         })
         .select('id, complaint_id')
@@ -140,6 +144,8 @@ export default function SubmitComplaint() {
         language: "English",
         description: "",
         location: "",
+        geoLat: undefined,
+        geoLng: undefined,
         attachments: [],
       });
 
@@ -288,23 +294,18 @@ export default function SubmitComplaint() {
 
                 {/* Location */}
                 <div className="space-y-2">
-                  <Label htmlFor="location">Location</Label>
-                  <div className="relative">
-                    <Input
-                      id="location"
-                      placeholder="Enter address or area"
-                      value={formData.location}
-                      onChange={(e) => setFormData((prev) => ({ ...prev, location: e.target.value }))}
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="absolute right-1 top-1/2 -translate-y-1/2"
-                    >
-                      <MapPin className="w-4 h-4" />
-                    </Button>
-                  </div>
+                  <Label>Location</Label>
+                  <GoogleMapsLocationPicker
+                    value={formData.location}
+                    onChange={(location, lat, lng) => 
+                      setFormData((prev) => ({ 
+                        ...prev, 
+                        location, 
+                        geoLat: lat,
+                        geoLng: lng 
+                      }))
+                    }
+                  />
                 </div>
 
                 {/* File Upload */}

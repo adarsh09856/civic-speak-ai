@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -57,7 +58,7 @@ const handler = async (req: Request): Promise<Response> => {
         complaint_id: complaintId,
         title: title,
         message: userMessage,
-        type: 'PUSH', // Using PUSH for in-app notifications
+        type: 'PUSH',
       });
 
     if (userNotifError) {
@@ -77,7 +78,6 @@ const handler = async (req: Request): Promise<Response> => {
     } else if (adminRoles && adminRoles.length > 0) {
       console.log(`Found ${adminRoles.length} admin(s) to notify`);
       
-      // Create notifications for all admins
       const adminNotifications = adminRoles.map(admin => ({
         user_id: admin.user_id,
         complaint_id: complaintId,
@@ -104,61 +104,70 @@ const handler = async (req: Request): Promise<Response> => {
       .eq('user_id', userId)
       .single();
 
-    // If RESEND_API_KEY is configured, send email to user
-    const resendApiKey = Deno.env.get("RESEND_API_KEY");
-    if (resendApiKey && profile?.email) {
-      console.log(`Sending email to ${profile.email}`);
+    // Send email using Gmail SMTP
+    const gmailUser = Deno.env.get("GMAIL_USER");
+    const gmailPassword = Deno.env.get("GMAIL_APP_PASSWORD");
+
+    if (gmailUser && gmailPassword && profile?.email) {
+      console.log(`Sending email to ${profile.email} via Gmail SMTP`);
+      
       try {
-        const emailResponse = await fetch("https://api.resend.com/emails", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${resendApiKey}`,
+        const client = new SMTPClient({
+          connection: {
+            hostname: "smtp.gmail.com",
+            port: 465,
+            tls: true,
+            auth: {
+              username: gmailUser,
+              password: gmailPassword,
+            },
           },
-          body: JSON.stringify({
-            from: "JanConnect+ <onboarding@resend.dev>",
-            to: [profile.email],
-            subject: title,
-            html: `
-              <div style="font-family: 'DM Sans', Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-                <div style="background: linear-gradient(135deg, #1a3a8f 0%, #0f2460 100%); padding: 30px; border-radius: 16px 16px 0 0; text-align: center;">
-                  <h1 style="color: white; margin: 0; font-size: 24px;">JanConnect+</h1>
-                </div>
-                <div style="background: #ffffff; padding: 30px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 16px 16px;">
-                  <h2 style="color: #1a3a8f; margin-top: 0;">Hello${profile.full_name ? ` ${profile.full_name}` : ''}!</h2>
-                  <p style="color: #374151; font-size: 16px; line-height: 1.6;">${userMessage}</p>
-                  <div style="background: #f3f4f6; padding: 16px; border-radius: 8px; margin: 20px 0;">
-                    <p style="margin: 0; color: #6b7280; font-size: 14px;">Complaint Reference:</p>
-                    <p style="margin: 8px 0 0 0; color: #1a3a8f; font-weight: bold; font-size: 16px;">${complaintTitle}</p>
-                  </div>
-                  <p style="color: #9ca3af; font-size: 12px; margin-top: 30px;">
-                    This is an automated message from JanConnect+. Please do not reply to this email.
-                  </p>
-                </div>
-              </div>
-            `,
-          }),
         });
 
-        if (emailResponse.ok) {
-          console.log("Email sent successfully");
-          // Update notification to show email was sent
-          await supabase
-            .from('notifications')
-            .update({ sent_at: new Date().toISOString(), type: 'EMAIL' })
-            .eq('complaint_id', complaintId)
-            .eq('user_id', userId)
-            .order('created_at', { ascending: false })
-            .limit(1);
-        } else {
-          const errorData = await emailResponse.text();
-          console.error("Email API error:", errorData);
-        }
+        const emailHtml = `
+          <div style="font-family: 'DM Sans', Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <div style="background: linear-gradient(135deg, #1a3a8f 0%, #0f2460 100%); padding: 30px; border-radius: 16px 16px 0 0; text-align: center;">
+              <h1 style="color: white; margin: 0; font-size: 24px;">JanConnect+</h1>
+            </div>
+            <div style="background: #ffffff; padding: 30px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 16px 16px;">
+              <h2 style="color: #1a3a8f; margin-top: 0;">Hello${profile.full_name ? ` ${profile.full_name}` : ''}!</h2>
+              <p style="color: #374151; font-size: 16px; line-height: 1.6;">${userMessage}</p>
+              <div style="background: #f3f4f6; padding: 16px; border-radius: 8px; margin: 20px 0;">
+                <p style="margin: 0; color: #6b7280; font-size: 14px;">Complaint Reference:</p>
+                <p style="margin: 8px 0 0 0; color: #1a3a8f; font-weight: bold; font-size: 16px;">${complaintTitle}</p>
+              </div>
+              <p style="color: #9ca3af; font-size: 12px; margin-top: 30px;">
+                This is an automated message from JanConnect+. Please do not reply to this email.
+              </p>
+            </div>
+          </div>
+        `;
+
+        await client.send({
+          from: gmailUser,
+          to: profile.email,
+          subject: title,
+          content: "auto",
+          html: emailHtml,
+        });
+
+        await client.close();
+
+        console.log("Email sent successfully via Gmail SMTP");
+        
+        // Update notification to show email was sent
+        await supabase
+          .from('notifications')
+          .update({ sent_at: new Date().toISOString(), type: 'EMAIL' })
+          .eq('complaint_id', complaintId)
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(1);
       } catch (emailError) {
-        console.error("Email sending failed:", emailError);
+        console.error("Gmail SMTP error:", emailError);
       }
     } else {
-      console.log("Email not sent - RESEND_API_KEY not configured or user has no email");
+      console.log("Email not sent - Gmail credentials not configured or user has no email");
     }
 
     return new Response(
