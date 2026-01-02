@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
-import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
+import { Resend } from "https://esm.sh/resend@2.0.0";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -104,25 +104,14 @@ const handler = async (req: Request): Promise<Response> => {
       .eq('user_id', userId)
       .single();
 
-    // Send email using Gmail SMTP
-    const gmailUser = Deno.env.get("GMAIL_USER");
-    const gmailPassword = Deno.env.get("GMAIL_APP_PASSWORD");
+    // Send email using Resend
+    const resendApiKey = Deno.env.get("RESEND_API_KEY");
 
-    if (gmailUser && gmailPassword && profile?.email) {
-      console.log(`Sending email to ${profile.email} via Gmail SMTP`);
+    if (resendApiKey && profile?.email) {
+      console.log(`Sending email to ${profile.email} via Resend`);
       
       try {
-        const client = new SMTPClient({
-          connection: {
-            hostname: "smtp.gmail.com",
-            port: 465,
-            tls: true,
-            auth: {
-              username: gmailUser,
-              password: gmailPassword,
-            },
-          },
-        });
+        const resend = new Resend(resendApiKey);
 
         const emailHtml = `
           <div style="font-family: 'DM Sans', Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
@@ -143,31 +132,34 @@ const handler = async (req: Request): Promise<Response> => {
           </div>
         `;
 
-        await client.send({
-          from: gmailUser,
-          to: profile.email,
+        const { data: emailData, error: emailError } = await resend.emails.send({
+          from: "JanConnect+ <onboarding@resend.dev>",
+          to: [profile.email],
           subject: title,
-          content: "auto",
           html: emailHtml,
         });
 
-        await client.close();
-
-        console.log("Email sent successfully via Gmail SMTP");
-        
-        // Update notification to show email was sent
-        await supabase
-          .from('notifications')
-          .update({ sent_at: new Date().toISOString(), type: 'EMAIL' })
-          .eq('complaint_id', complaintId)
-          .eq('user_id', userId)
-          .order('created_at', { ascending: false })
-          .limit(1);
+        if (emailError) {
+          console.error("Resend email error:", emailError);
+        } else {
+          console.log("Email sent successfully via Resend:", emailData);
+          
+          // Update notification to show email was sent
+          await supabase
+            .from('notifications')
+            .update({ sent_at: new Date().toISOString(), type: 'EMAIL' })
+            .eq('complaint_id', complaintId)
+            .eq('user_id', userId)
+            .order('created_at', { ascending: false })
+            .limit(1);
+        }
       } catch (emailError) {
-        console.error("Gmail SMTP error:", emailError);
+        console.error("Resend error:", emailError);
       }
     } else {
-      console.log("Email not sent - Gmail credentials not configured or user has no email");
+      console.log("Email not sent - Resend API key not configured or user has no email");
+      if (!resendApiKey) console.log("Missing RESEND_API_KEY");
+      if (!profile?.email) console.log("Missing user email");
     }
 
     return new Response(
