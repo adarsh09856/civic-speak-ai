@@ -3,5 +3,5 @@ project_id = "xiiqimyatnyizgwtdida"
 [functions.send-notification]
 verify_jwt = false
 
-[functions.get-maps-key]
+[functions.get-mapbox-token]
 verify_jwt = false

@@ -23,7 +23,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
-import { GoogleMapsLocationPicker } from "@/components/GoogleMapsLocationPicker";
+import { MapboxLocationPicker } from "@/components/MapboxLocationPicker";
 import { Input } from "@/components/ui/input";
 
 const categories = [
@@ -295,7 +295,7 @@ export default function SubmitComplaint() {
                 {/* Location */}
                 <div className="space-y-2">
                   <Label>Location</Label>
-                  <GoogleMapsLocationPicker
+                  <MapboxLocationPicker
                     value={formData.location}
                     onChange={(location, lat, lng) => 
                       setFormData((prev) => ({ 
