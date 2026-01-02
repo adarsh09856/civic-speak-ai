@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
-import { Resend } from "https://esm.sh/resend@2.0.0";
+import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -50,7 +50,7 @@ const handler = async (req: Request): Promise<Response> => {
     const adminMessage = adminStatusMessages[status] || `Complaint status updated to ${status}.`;
     const title = `Complaint ${status.replace('_', ' ')}: ${complaintTitle}`;
 
-    // Create in-app notification for the user (using PUSH type for in-app)
+    // Create in-app notification for the user
     const { error: userNotifError } = await supabase
       .from('notifications')
       .insert({
@@ -104,14 +104,28 @@ const handler = async (req: Request): Promise<Response> => {
       .eq('user_id', userId)
       .single();
 
-    // Send email using Resend
-    const resendApiKey = Deno.env.get("RESEND_API_KEY");
+    // Send email using Gmail SMTP
+    const gmailUser = Deno.env.get("GMAIL_USER");
+    const gmailPassword = Deno.env.get("GMAIL_APP_PASSWORD");
 
-    if (resendApiKey && profile?.email) {
-      console.log(`Sending email to ${profile.email} via Resend`);
+    console.log(`Gmail config check - User: ${gmailUser ? 'SET' : 'NOT SET'}, Password: ${gmailPassword ? 'SET' : 'NOT SET'}`);
+    console.log(`Profile email: ${profile?.email || 'NOT FOUND'}`);
+
+    if (gmailUser && gmailPassword && profile?.email) {
+      console.log(`Attempting to send email to ${profile.email} via Gmail SMTP`);
       
       try {
-        const resend = new Resend(resendApiKey);
+        const client = new SMTPClient({
+          connection: {
+            hostname: "smtp.gmail.com",
+            port: 465,
+            tls: true,
+            auth: {
+              username: gmailUser,
+              password: gmailPassword,
+            },
+          },
+        });
 
         const emailHtml = `
           <div style="font-family: 'DM Sans', Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
@@ -132,34 +146,36 @@ const handler = async (req: Request): Promise<Response> => {
           </div>
         `;
 
-        const { data: emailData, error: emailError } = await resend.emails.send({
-          from: "JanConnect+ <onboarding@resend.dev>",
-          to: [profile.email],
+        await client.send({
+          from: gmailUser,
+          to: profile.email,
           subject: title,
+          content: "auto",
           html: emailHtml,
         });
 
-        if (emailError) {
-          console.error("Resend email error:", emailError);
-        } else {
-          console.log("Email sent successfully via Resend:", emailData);
+        await client.close();
+
+        console.log("Email sent successfully via Gmail SMTP");
+        
+        // Update notification to show email was sent
+        await supabase
+          .from('notifications')
+          .update({ sent_at: new Date().toISOString(), type: 'EMAIL' })
+          .eq('complaint_id', complaintId)
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(1);
           
-          // Update notification to show email was sent
-          await supabase
-            .from('notifications')
-            .update({ sent_at: new Date().toISOString(), type: 'EMAIL' })
-            .eq('complaint_id', complaintId)
-            .eq('user_id', userId)
-            .order('created_at', { ascending: false })
-            .limit(1);
-        }
-      } catch (emailError) {
-        console.error("Resend error:", emailError);
+      } catch (emailError: any) {
+        console.error("Gmail SMTP error:", emailError.message || emailError);
+        console.error("Gmail SMTP error details:", JSON.stringify(emailError, null, 2));
       }
     } else {
-      console.log("Email not sent - Resend API key not configured or user has no email");
-      if (!resendApiKey) console.log("Missing RESEND_API_KEY");
-      if (!profile?.email) console.log("Missing user email");
+      console.log("Email not sent - missing configuration:");
+      if (!gmailUser) console.log("  - GMAIL_USER not set");
+      if (!gmailPassword) console.log("  - GMAIL_APP_PASSWORD not set");
+      if (!profile?.email) console.log("  - User profile has no email");
     }
 
     return new Response(
@@ -167,7 +183,7 @@ const handler = async (req: Request): Promise<Response> => {
       { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } }
     );
   } catch (error: any) {
-    console.error("Error in send-notification:", error);
+    console.error("Error in send-notification:", error.message || error);
     return new Response(
       JSON.stringify({ error: error.message }),
       { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } }
